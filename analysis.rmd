@@ -1,0 +1,396 @@
+---
+title: "Аналіз рекомендацій в Steam"
+author: "Скороденко Дмитро"
+header-includes:
+   - \usepackage[utf8]{inputenc}
+   - \usepackage[T2A]{fontenc}
+   - \usepackage[english,ukrainian]{babel}
+output: pdf_document
+---
+
+```{r, setup, include = FALSE}
+library(tidyverse)
+library(GGally)
+library(fastqq)
+```
+
+# Лабораторна №0 -- Вибір датасету --
+
+Для проведення аналізу даних було обрано [датасет](https://www.kaggle.com/datasets/antonkozyriev/game-recommendations-on-steam), який містить 10M+ записів про рекомендації комп'ютерних ігор користувачів платформи [Steam](https://store.steampowered.com/). Оскільки в цьому датасеті зібрано дані про ігри які були випущені з 1997 по 2023 рік, то його розмір не дасть змогу провести нормальний аналіз, тому аналіз буде проводитись над іграми, які були випущені у 2022 році.
+
+## Питання для дослідження:
+
+-   Залежність між кількістю ігрових годин та позитивною рекомендацією.
+-   Вплив цінової категорії на рейтинг гри.
+-   Залежніть між рейтингом гри та високими (20% +) знижками.
+-   Зв'язок між кількістю рев'ю та їх корисністю.
+-   Зв'язок між кількістю придбаних ігор та середнім часом у грі.
+-   Чи суттєво збільшує початкову вартість гри підтримка `Mac`, `Linux (native)`.
+
+## Гіпотези по дослідницьким питанням:
+
+-   Між к-стю ігрових годин та позитивною рекомендацією може бути певна залежність (позитивну рекомендацію можуть ставити після більшого проведеного часу в грі ніж негативну).
+-   Середня (низька) цінова категорія може мати позитивний вплив на рейтинг гри.
+-   Високі знижки можуть мати позитивний вплив на рейтинг гри.
+-   Можливо велика к-сть рев'ю може мати позитивний вплив на середню корисність рев'ю певного користувача.
+-   Можливо зв'язок між к-стю придбаних ігор та  середнім ігровим часом обернений (більше ігр = менше ігрового часу в середньому).
+-   Підтримка додаткових платформ `Mac` та `Linux (native)` скоріше за все збільшує початкову ціну гри.
+
+## Короткий опис датасету:
+
+Датасет містить 4 файли, далі наведено короткий опис кодного з них:
+
+-   "games.csv"
+    -   **app_id** - ід гри
+    -   **title** - назва гри
+    -   **date_release** - дата випуску гри
+    -   **win** - підтримка гри на `Windows`
+    -   **mac** - підтримка гри на `Mac`
+    -   **linux** - підтримка гри на `Linux (native)`
+    -   **rating** - рейтинг гри
+    -   **positive_ratio** - відношення позитивних відгуків до всіх відгуків (у відсотках)
+    -   **user_reviews** - кількість відгуків
+    -   **price_final** - ціна зі знижками
+    -   **price_original** - ціна при випускі гри
+    -   **discount** - знижка (у відсотках)
+    -   **steam_deck** - підтримка гри на `Steam Deck`
+-   "recomendations.csv"
+    -   **app_id** - ід гри
+    -   **helpful** - к-сть користувачів, які сказали що рекомендація корисна
+    -   **funny** - к-сть користувачів, які сказали що рекомендація дотепна
+    -   **date** - дата публікації рекомендації
+    -   **is_recommended** - чи рекомендує користувач дану гру
+    -   **hours** - к-сть годин проведених у грі
+    -   **user_id** - ід користувача
+    -   **review_id** - ід рев'ю
+-   "users.csv"
+    -   **user_id** - ід користувача
+    -   **products** - кількість куплених продуктів на платформі `Steam`
+    -   **reviews** - к-сть рев'ю, які написав користувач
+-   "games_metadata.json"
+    -   Файл, що містить метаданні (теги, к-сть DLC ...). При аналізі даних використовуватись не буде
+
+# Лабораторна №1 -- EDA --
+
+```{r, data_import, include = FALSE}
+games <- read_csv("data/games.csv")
+recomendations <- read_csv("data/recommendations.csv")
+users <- read_csv("data/users.csv")
+```
+
+## Підготовка даних
+
+Дані в вибраному датасеті поділені на файли `users.csv`, `games.csv` та `recomendations.csv`. Остання є таблицею для зв'язку many to many. Для того щоб проводити подальшу роботу всі дані будуть об'єднані в одну таблицю.
+
+```{r, table_join}
+data <- inner_join(recomendations, games, by="app_id")
+data <- inner_join(data, users, by="user_id")
+
+rm(recomendations)
+rm(games)
+rm(users)
+
+glimpse(data)
+```
+
+Далі відфільтруємо ігри які були випущені у 2022 році.
+
+```{r}
+data <- data %>% filter(date_release > '2022-01-01')
+data <- data %>% filter(date_release < '2023-01-01')
+glimpse(data)
+```
+
+Далі перевіримо дані на `na`.
+
+```{r}
+data %>% is.na %>% colSums()
+```
+
+Датасет чистий.
+
+Далі буде доцільно перекодувати колонку `rating`. Дані про кодування взято [тут](https://www.gamedeveloper.com/business/fixing-steam-s-user-rating-charts).
+
+```{r}
+rating <- case_match(
+    data$rating,
+    "Overwhelmingly Negative" ~ -4,
+    "Very Negative" ~ -3,
+    "Negative" ~ -2,
+    "Mostly Negative" ~ -1,
+    "Mixed" ~ 0,
+    "Mostly Positive" ~ 1,
+    "Positive" ~ 2,
+    "Very Positive" ~ 3,
+    "Overwhelmingly Positive" ~ 4
+)
+tmp <- tibble(rating = rating)
+data <- data %>% select(-rating) %>% bind_cols(tmp)
+data$rating %>% head(n=10)
+```
+
+Також можна прибрати колонку `title`, так як нас не цікавить назва гри, та змінити тип даних у деяких числових колонках.
+
+```{r}
+data <- data %>% select(-c(title))
+
+data <- data %>%
+    mutate(
+        app_id = as.integer(app_id),
+        user_id = as.integer(user_id),
+        review_id = as.integer(review_id),
+        helpful = as.integer(helpful),
+        funny = as.integer(funny),
+        user_reviews = as.integer(user_reviews),
+        discount = as.integer(discount),
+        products = as.integer(products),
+        reviews = as.integer(reviews),
+        rating = as.integer(rating),
+        positive_ratio = as.integer(positive_ratio)
+    )
+```
+
+
+\newpage
+
+## Огляд числових характеристик
+
+Оскільки початковий датасет включав зв'язок many to many, то огляд числових характеристик буде проводитись окремо для кожної сутності (`app`, `user`, `review`)
+
+```{r}
+data %>% distinct(app_id, .keep_all = TRUE) %>% select(where(is.numeric)) %>% summary
+data %>% distinct(user_id, .keep_all = TRUE) %>% select(where(is.numeric)) %>% summary
+data %>% distinct(review_id, .keep_all = TRUE) %>% select(where(is.numeric)) %>% summary
+```
+
+\newpage
+
+### Викиди
+
+Очевидними кандидатами на перевірку викидів є `helpful`, `funny` та `products`.
+
+```{r, echo = FALSE, fig.cap = "QQ plots"}
+data  %>% distinct(review_id, .keep_all = TRUE) %>% pull(helpful) %>% qqnorm(main = "Helpful qq plot")
+data  %>% distinct(app_id, .keep_all = TRUE)  %>% pull(funny) %>% qqnorm(main = "Funny qq plot")
+data  %>% distinct(user_id, .keep_all = TRUE) %>% pull(products) %>% qqnorm(main = "Products qq plot")
+```
+
+У всіх 3-ох випадках є підозрілі на перший погляд значення, однак викидами вони не є, судячи з контексту датасету. Також варто зазначити, що всі 3 величини не мають нормального розподілу.
+
+
+\newpage
+
+## Аналіз даних
+
+Оскільки дослідні питання в більшості шукають зв'язок між змінними, то спочатку буде побудовано корелеграму.
+
+```{r, fig.cap = "Корелеграма", echo = FALSE}
+pdata <- data %>% select(-c(app_id, user_id, review_id)) %>% select(where(is.numeric))
+
+ggcorr(pdata, label = TRUE)
+```
+
+Далі буде наведено певні графіки, які будуть згруповані відносно кожного із дослідницьких питань.
+
+
+\newpage
+
+-   **Залежність між кількістю ігрових годин та позитивною рекомендацією**
+
+Для початку варто побудувати фацетовані графіки ігрових годин і кількостей позитивних/негативних рекомендацій.
+
+```{r, message = FALSE, echo = FALSE, fig.cap = "Рекомендацій відносно ігрових годин та виду реакції"}
+pdata <- data %>% group_by(hours, is_recommended) %>%
+    summarise(recomendation_count = length(is_recommended))
+
+ggplot(pdata, aes(x = hours, y = recomendation_count)) +
+    geom_point(size = 0.05) +
+    labs(x = "In-game hours", y = "Recomendation count") +
+    facet_wrap(~is_recommended, labeller = as_labeller(c("TRUE" = "Recomends", "FALSE" = "Not recomends")))
+```
+
+Стосовно даного графіку можна вказати 3 факти:
+
+-   Графік позитивних рекомендацій більш зміщений вправо (більше ігрових годин):
+    -   Більшість негативних рекомендацій в перші 100 ігрових годин.
+    -   Більшість позитивних рекомендацій в перші 250 ігрових годин.
+-  Абсолютна більшість всіх оцінок відбувається в проміжку [0, 250] ігрових годин
+
+Варто відзначити, що з даного графіку можна зробити висновок, що певний зв'язок між годинами та позитивною рекомендацією є.
+Однак його потрібно буде дослідити більш детально, так як абсолютний коефіцієнт кореляції Пірсона між `hours` та `rating` невеликий.
+Початкову гіпотезу не відкидаємо.
+
+
+\newpage
+
+-   **Вплив цінової категорії на рейтинг гри**
+
+Зообразимо розподіл ціни (`price_original`) відносно оціночних категорій (`rating`)
+
+```{r, echo = FALSE, fig.cap = "Розподіл цін відносно оціночних категорій"}
+pdata <- data %>% distinct(app_id, .keep_all = TRUE) %>% select(price_original, rating)
+
+pdata$factor <- factor(x = pdata$rating,
+                       levels = c(-4,-3,-2,-1,0,1,2,3,4))
+
+ggplot(pdata, aes(x = factor, y = price_original)) +
+    geom_boxplot() +
+    labs(x = "Game rating", y = "Original price")
+```
+
+Категорії рейтингу лежать в межах інтервалу [-4,4], де 4 - це найвища оцінка. Стосовно даного графіку можна вказати декілька фактів:
+
+-   Ігри з нижчими рейтингами (0) мають дуже велику к-сть дешевих ігр (1 квантиль \~ 0).
+-   Ігри з вищими рейтингами (1, 2, 3, 4) в середньому мають середню цінову категорію (\~25 доларів).
+-   Ігри із вищим рейтингом мають в середньому меншу різницю між 1 і 3 квантилями.
+
+Резюмуючи вище наведені факти, певна залежність є, і коефіцієнт кореляції Пірсона це підтведжує.
+Для того щоб робити точніші висновки потрібне більш детальне дослідження.
+Початкову гіпотезу не відкидаємо.
+
+
+\newpage
+
+-   **Залежність між рейтингом та високими (20% +) знижками**
+
+Нанесемо на грфік відсоток позитивних відгуків (`positive_ratio`), фінальну ціну (`price_final`) та знижку (`discount`). Також варто зазначити що величина `positive_ratio` напряму зв'язана з `rating`, однак остання є дискретною, а на даному графіку краще неперевна величина.
+
+```{r, echo = FALSE, fig.cap = "Відсоток позитивних відгуків відносно знижки та фінальної ціни"}
+pdata <- data %>%
+    distinct(app_id, .keep_all = TRUE) %>%
+    select(positive_ratio, price_final, discount) %>%
+    arrange(discount) %>%
+    filter(discount > 0)
+
+ggplot(pdata, aes(x = price_final, y = positive_ratio, size = discount)) +
+    geom_point(alpha=0.5) +
+    labs(x = "Final price", y = "Positive ratio")
+```
+
+Даний графік чітко показує, що дане дослідне пиитання не є безпідставним.
+Більша частина знижок знаходиться вище 70% позитивних відгуків.
+Варто доповнити початкову гіпотезу і розглядати не тільки високі знижки (20% +) а і усі інші.
+
+
+\newpage
+
+-   **Зв'язок між кількістю рев'ю користувача і їх корисністю**
+
+Нанесемо на графік розподіли рев'ю (`reviews`) та корисністі (`helpful`) відносно кожного окремого користувача (`users`). Нас цікавить тільки взаємодія великої к-сть рев'ю та к-сті корсиних рев'ю.
+
+```{r, echo = FALSE, fig.cap = "Розподіли рев'ю та середньої користності"}
+usertb <- data %>%
+    group_by(user_id) %>%
+    summarise(helpfullness = mean(helpful))
+
+reviewtb <- data %>%
+    distinct(user_id, .keep_all = TRUE) %>%
+    select(user_id, reviews)
+
+pdata <- inner_join(usertb, reviewtb, by="user_id")
+pdata <- pdata %>% select(-c(user_id))
+
+pdata <- pdata %>% filter(reviews > 100) %>% filter(helpfullness > 100) %>% arrange(reviews)
+
+ggplot(pdata) +
+    geom_density(aes(x = reviews), alpha=0.5, fill="#69b3a2") +
+    geom_label(aes(label = "Reviews", x=130, y=0.09), color = "#69b3a2") +
+    geom_density(aes(x = helpfullness), alpha=0.5, fill= "#404080") +
+    geom_label(aes(label = "Helpfullness", x=130, y=0.06), color = "#404080") +
+    xlab("User reviews / helpfullness") +
+    ylab("Density")
+```
+
+Щільність розподілів `reviews` та `helpfullness` не мають чіткої взаємодії, а коефіцієнт кореляції = 0.
+Із наведених фактів можна з впевненістю відкинути як дане дослідницьке питання, так і початкову гіпотезу.
+
+
+\newpage
+
+-   **Зв'язок між кількістю придбаних ігор та середнім часом у грі**
+
+Нанесемо на графік середній час гри `mean(hours)` та кількість придбаних продуктів `products`.
+
+```{r, echo = FALSE, fig.cap = "Середній час у грі відносно к-сті придбаних ігор"}
+mean_playtime <- data %>%
+    group_by(user_id) %>%
+    summarise(mean_playtime = mean(hours))
+
+games_purchased <- data %>%
+    distinct(user_id, .keep_all = TRUE) %>%
+    select(user_id, products)
+
+pdata <- inner_join(games_purchased, mean_playtime, by="user_id")
+pdata <- pdata %>% arrange(products)
+pdata <- pdata %>% filter(products > 0)
+
+ggplot(pdata, aes(x = products, y = mean_playtime)) +
+    geom_point(pch=".") +
+    labs(x = "Products", y = "Mean in-game time")
+```
+
+З наведеного вище графіку видно, що ті у кого багато ігр в середньому грають у них менше, і навпаки: ті у кого мало ігр - грають у них в сердньому довше.
+Тому дане дослідницьке питання не є зовсім безпідставним.
+Початкову гіпотезу не відкидаєм.
+
+
+\newpage
+
+-   **Чи суттєво підтримка гри на Mac, Linux (native) збільшує початкову вартість гри**
+
+Спочатку важливо зрозуміти співвідношення між різними платформами. Варто зазначити, що є ще одна платформа `Steam Deck`, але вона фактично запускає ті самі ігри що і `Windows`.
+
+```{r, echo = FALSE, fig.cap = "Співідношення між платформами"}
+pdata <- data %>%
+    distinct(app_id, .keep_all = TRUE) %>%
+    summarise(win = sum(win), mac = sum(mac), linux = sum(linux))
+
+pie(
+    c(pdata$win, pdata$mac, pdata$linux),
+    labels = c("Windows", "Mac", "Linux (native)")
+)
+```
+
+Так як доля `Linux (ntaive)` + `Mac` майже чверть від усіх ігор на `Windows`, то побудуємо графіки розподілу вартості відносно цих 2 категорій.
+
+```{r, echo = FALSE, fig.cap = "Розподіл ціни відносно плтаформ"}
+win <- data %>%
+    distinct(app_id, .keep_all = TRUE) %>%
+    filter(win == TRUE & mac == FALSE & linux == FALSE) %>%
+    select(price_original) %>% arrange(price_original)
+
+nonwin <- data %>%
+    distinct(app_id, .keep_all = TRUE) %>%
+    filter(win == FALSE & mac == TRUE | linux == TRUE) %>%
+    select(price_original) %>% arrange(price_original)
+
+ggplot() +
+    geom_density(aes(x = win$price_original), alpha=0.5, fill="#69b3a2") +
+    geom_label(aes(label = "Windows", x=130, y=0.09), color = "#69b3a2") +
+    geom_density(aes(x = nonwin$price_original), alpha=0.5, fill= "#404080") +
+    geom_label(aes(label = "Mac + Linux", x=130, y=0.06), color = "#404080") +
+    xlab("Product price") +
+    ylab("Density")
+```
+
+Судячи із графіку певна залежність дійсно є: ігри із підтримкою `Linux` або `Mac` дійсно дорожчі.
+Початкову гіпотезу не відкидаєм.
+
+
+\newpage
+
+## Висновки EDA
+
+На основі проведеного розвідкового аналізу можна зробити наступні висновки:
+
+- Серед початкових дослідницьких питаннь неактуальними є:
+    - Зв'язок між кількістю рев'ю та їх корисністю.
+- Всі ініші дослідницькі питання залишаються актуальними.
+    - Початкові гіпотези, що потребують подальшого розгляду:
+        - Між к-стю ігрових годин та позитивною рекомендацією може бути певна залежність (позитивну рекомендацію можуть ставити після більшого проведеного часу в грі ніж негативну).
+        - Середня (низька) цінова категорія може мати позитивний вплив на рейтинг гри.
+        - Можливо зв'язок між к-стю придбаних ігор та  середнім ігровим часом обернений (більше ігр = менше ігрового часу в середньому).
+        - Підтримка додаткових платформ `Mac` та `Linux (native)` скоріше за все збільшує початкову ціну гри.
+    - Доповнені гіпотези, що потребують подальшого розгляду:
+        - Знижки можуть мати позитивний вплив на рейтинг гри.
+- Головним обмеженням даного аналізу є великий розмір датасету, однак використання спецальних бібліотек типу `fastqq` непогано вирішує це питання навіть без додаткованих обцислюючих потужностей.
