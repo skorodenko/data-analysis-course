@@ -40,7 +40,7 @@ library(boot)
 
 ## Гіпотези по дослідницьким питанням:
 
-3) Ціни із високими знижками скоріше за все сприяють збільшенню рейтингу.
+3) Ціни із високими знижками скоріше за все сприяють зменшенню рейтингу.
 4) Можливо велика к-сть рев'ю може мати позитивний вплив на середню корисність рев'ю певного користувача.
 5) Скоріше за все зв'язок між кумедністю та корисністю рев'ю - прямий (вища кумедність = вища корисність).
 6) Підтримка додаткових платформ `Mac` та `Linux (native)` скоріше за все не змінює вартість гри.
@@ -175,7 +175,6 @@ data %>% distinct(app_id, .keep_all = TRUE) %>%
         price_original, discount,
         win, mac, linux, steam_deck
     ) %>%
-    select(where(is.numeric)) %>%
     summary
 ```
 
@@ -185,7 +184,6 @@ data %>% distinct(user_id, .keep_all = TRUE) %>%
         user_id, products,
         reviews
     ) %>%
-    select(where(is.numeric)) %>%
     summary
 ```
 
@@ -205,10 +203,10 @@ data %>% distinct(review_id, .keep_all = TRUE) %>%
 
 Очевидними кандидатами на перевірку викидів є `helpful`, `funny` та `products`.
 
-```{r, echo = FALSE}
-#data  %>% distinct(review_id, .keep_all = TRUE) %>% pull(helpful) %>% qqnorm(main = "Helpful qq plot")
-#data  %>% distinct(app_id, .keep_all = TRUE)  %>% pull(funny) %>% qqnorm(main = "Funny qq plot")
-#data  %>% distinct(user_id, .keep_all = TRUE) %>% pull(products) %>% qqnorm(main = "Products qq plot")
+```{r, echo = FALSE, eval = TRUE}
+data  %>% distinct(review_id, .keep_all = TRUE) %>% pull(helpful) %>% qqnorm(main = "Helpful qq plot")
+data  %>% distinct(app_id, .keep_all = TRUE)  %>% pull(funny) %>% qqnorm(main = "Funny qq plot")
+data  %>% distinct(user_id, .keep_all = TRUE) %>% pull(products) %>% qqnorm(main = "Products qq plot")
 ```
 
 У `funny` та `helpful` є викиди. Тому варто позбавитись їх.
@@ -228,7 +226,7 @@ data <- data %>%
 
 Для початку варто побудувати фацетовані графіки ігрових годин і кількостей позитивних/негативних рекомендацій.
 
-```{r, message = FALSE, echo = FALSE, fig.cap = "Рекомендації відносно ігрових годин та виду реакції"}
+```{r, message = FALSE, echo = FALSE, fig.cap = "Рекомендації відносно ігрових годин та виду реакції", eval = TRUE}
 pdata <- data %>% group_by(hours, is_recommended) %>%
     summarise(recomendation_count = length(is_recommended))
 
@@ -261,8 +259,8 @@ ggplot(pdata, aes(x = hours, y = recomendation_count)) +
 - В середньому навть на 1000-их годинах позитивниі рекомендації ставлять часто, а для негативних реакцій це рідкість.
 - Для того щоб набрати 50% всіх рекомендацій знадобилось в середньому:
 
-```{r, echo = FALSE}
-ldata
+```{r, echo = FALSE, eval = TRUE}
+knitr::kable(ldata, "simple")
 ```
 
 
@@ -272,26 +270,26 @@ ldata
 
 Зообразимо розподіл ціни (`price_original`) відносно оціночних категорій (`rating`)
 
-```{r, echo = FALSE, fig.cap = "Розподіл цін відносно оціночних категорій"}
-#pdata <- data %>% distinct(app_id, .keep_all = TRUE) %>% select(price_original, rating)
-#
-#ldata <- pdata %>%
-#    group_by(rating) %>%
-#    summarise(mean(price_original), n = length(price_original))
-#
-#pdata$factor <- factor(x = pdata$rating,
-#                       levels = c(-4,-3,-2,-1,0,1,2,3,4))
-#
-#ggplot(pdata, aes(x = factor, y = price_original)) +
-#    geom_boxplot() +
-#    labs(x = "Game rating", y = "Original price")
+```{r, echo = FALSE, fig.cap = "Розподіл цін відносно оціночних категорій", eval = TRUE}
+pdata <- data %>% distinct(app_id, .keep_all = TRUE) %>% select(price_original, rating)
+
+ldata <- pdata %>%
+    group_by(rating) %>%
+    summarise(mean(price_original), n = length(price_original))
+
+pdata$factor <- factor(x = pdata$rating,
+                       levels = c(-4,-3,-2,-1,0,1,2,3,4))
+
+ggplot(pdata, aes(x = factor, y = price_original)) +
+    geom_boxplot() +
+    labs(x = "Game rating", y = "Original price")
 ```
 
 Категорії рейтингу лежать в межах інтервалу [-4,4], де 4 - це найвища оцінка.
 Середні значення наведені далі:
 
-```{r, echo = FALSE}
-#ldata
+```{r, echo = FALSE, eval = TRUE}
+knitr::kable(ldata, "simple")
 ```
 
 
@@ -306,21 +304,21 @@ ldata
 Оскільки початкова гіпотеза вказує на те що високі знижки - ознака поганої гри,
 знижки будуть відфільтровані відносно 3 квартилю.
 
-```{r, echo = FALSE, fig.cap = "Відсоток позитивних відгуків відносно знижки та фінальної ціни"}
-#pdata <- data %>%
-#    distinct(app_id, .keep_all = TRUE) %>%
-#    select(positive_ratio, price_final, discount) %>%
-#    arrange(discount) %>%
-#    filter(discount > 0)
-#
-#quartile_3rd <- quantile(pdata$discount)[4]
-#
-#pdata <- pdata %>% filter(discount >= quartile_3rd)
-#
-#ggplot(pdata, aes(x = price_final, y = positive_ratio)) +
-#    geom_point(alpha=0.5) +
-#    geom_smooth(method=lm, color="red", se=TRUE) +
-#    labs(x = "Final price", y = "Positive ratio")
+```{r, echo = FALSE, fig.cap = "Відсоток позитивних відгуків відносно знижки та фінальної ціни", eval = TRUE}
+pdata <- data %>%
+    distinct(app_id, .keep_all = TRUE) %>%
+    select(positive_ratio, price_final, discount) %>%
+    arrange(discount) %>%
+    filter(discount > 0)
+
+quartile_3rd <- quantile(pdata$discount)[4]
+
+pdata <- pdata %>% filter(discount >= quartile_3rd)
+
+ggplot(pdata, aes(x = price_final, y = positive_ratio)) +
+    geom_point(alpha=0.5) +
+    geom_smooth(method=lm, color="red", se=TRUE) +
+    labs(x = "Final price", y = "Positive ratio")
 ```
 
 Даний графік чітко показує, що дане дослідне пиитання не є безпідставним.
@@ -328,9 +326,9 @@ ldata
 
 Обрахуємо коефіцієнт кореляції
 
-```{r}
-#coef <- cor.test(pdata$price_final, pdata$positive_ratio)
-#coef
+```{r, eval = TRUE}
+coef <- cor(pdata$price_final, pdata$positive_ratio)
+knitr::kable(coef, "simple")
 ```
 
 Коефіцієнт кореляції від'ємний - тобто зв'язок є.
@@ -343,28 +341,38 @@ ldata
 
 Нанесемо на графік рев'ю (`reviews`) та ln корисністі (`helpfullness`) відносно кожного окремого користувача (`users`).
 
-```{r, echo = FALSE, fig.cap = "Розподіли рев'ю та користності"}
-#usertb <- data %>%
-#    group_by(user_id) %>%
-#    summarise(helpfullness = sum(helpful))
-#
-#reviewtb <- data %>%
-#    distinct(user_id, .keep_all = TRUE) %>%
-#    select(user_id, reviews)
-#
-#pdata <- inner_join(usertb, reviewtb, by="user_id")
-#pdata <- pdata %>% select(-c(user_id))
-#
-#pdata <- pdata %>% filter(helpfullness > 0) %>% mutate_at(vars(matches("helpfullness")), log) %>% arrange(reviews)
-#
-#ggplot(pdata, aes(x = reviews, y = helpfullness)) +
-#    geom_point(alpha=0.1) +
-#    xlab("User reviews") +
-#    ylab("Ln(helpfullness)")
+```{r, echo = FALSE, fig.cap = "Розподіли рев'ю та користності", eval = TRUE}
+usertb <- data %>%
+    group_by(user_id) %>%
+    summarise(helpfullness = sum(helpful))
+
+reviewtb <- data %>%
+    distinct(user_id, .keep_all = TRUE) %>%
+    select(user_id, reviews)
+
+pdata <- inner_join(usertb, reviewtb, by="user_id")
+pdata <- pdata %>% select(-c(user_id))
+
+pdata <- pdata %>%
+    filter(helpfullness > 0) %>%
+    filter(reviews > 0)
+
+coef <- cor(pdata$reviews, pdata$helpfullness)
+
+pdata <- pdata %>%
+    mutate_at(vars(matches("helpfullness")), log) %>%
+    arrange(reviews)
+
+ggplot(pdata, aes(x = reviews, y = helpfullness)) +
+    geom_point(alpha=0.1) +
+    xlab("User reviews") +
+    ylab("Ln(helpfullness)")
+
+knitr::kable(coef, "simple")
 ```
 
 На графіку видно, що `reviews` та `ln(helpfullness)` не мають чіткої взаємодії.
-З наведених фактів можна з впевненістю відкинути дане дослідницьке питання.
+Коефіцієнт кореляції != 0, тому питання потребує уточнення.
 
 
 \newpage
@@ -374,16 +382,16 @@ ldata
 Оскільки початкова гіпотеза вказує на прямий зв'язок між кумедністю та корисністю.
 Просто обрахуємо коефіцієнт кореляції.
 
-```{r, echo = FALSE}
-#pdata <- data %>%
-#    group_by(user_id) %>%
-#    summarise(
-#        helpful = median(helpful),
-#        funny = median(funny)
-#    )
-#
-#coef <- cor.test(pdata$helpful, pdata$funny)
-#coef
+```{r, echo = FALSE, eval = TRUE}
+pdata <- data %>%
+    group_by(user_id) %>%
+    summarise(
+        helpful = sum(helpful),
+        funny = sum(funny)
+    )
+
+coef <- cor(pdata$helpful, pdata$funny)
+knitr::kable(coef, "simple")
 ```
 
 Коефіцієнт кореляції > 0.5.
@@ -396,7 +404,7 @@ ldata
 
 Спочатку важливо зрозуміти співвідношення між різними платформами. Варто зазначити, що є ще одна платформа `Steam Deck`, але вона фактично запускає ті самі ігри що і `Windows`.
 
-```{r, echo = FALSE, fig.cap = "Співідношення між платформами"}
+```{r, echo = FALSE, fig.cap = "Співідношення між платформами", eval = TRUE}
 pdata <- data %>%
     distinct(app_id, .keep_all = TRUE) %>%
     summarise(win = sum(win), mac = sum(mac), linux = sum(linux))
@@ -409,9 +417,12 @@ pie(
 
 Так як доля `Linux (native)` + `Mac` майже чверть від усіх ігор на `Windows`,
 то побудуємо гістограми розподілу цін.
+
+\newpage
+
 Будть розглянуті ціни відносно `Linux (native)` та/або `Mac`.
 
-```{r, message = FALSE, echo = FALSE, fig.cap = "Ціна відносно платформи"}
+```{r, message = FALSE, echo = FALSE, fig.cap = "Ціна відносно платформи", eval = TRUE}
 pdata <- data %>% distinct(app_id, .keep_all = TRUE)
 
 pdata$winonly <- ifelse(pdata$mac | pdata$linux, FALSE, TRUE)
@@ -419,10 +430,10 @@ pdata$winonly <- ifelse(pdata$mac | pdata$linux, FALSE, TRUE)
 ggplot(pdata, aes(x=price_original, fill=winonly)) +
     geom_histogram(alpha=0.5, position = 'identity') +
     scale_fill_manual(values=c("#69b3a2", "#404080")) +
-    labs(x="Ціна", y="К-сть")
+    labs(x="Price", y="Count")
 ```
 
-Судячи із графіків в цілому `Mac` та/або `Linux (native)` як мінімум не перевищує ціну гри на `Windows`.
+Судячи із графіків в цілому ціни на ігри на `Mac` та/або `Linux (native)` як мінімум не перевищюють ціну гри на `Windows`.
 Початкову гіпотезу не відкидаєм.
 
 
@@ -432,25 +443,27 @@ ggplot(pdata, aes(x=price_original, fill=winonly)) +
 
 На основі проведеного розвідкового аналізу можна зробити наступні висновки:
 
-- Серед початкових дослідницьких питаннь неактуальними є:
-    - Зв'язок між кількістю рев'ю та їх корисністю.
-- Всі ініші дослідницькі питання залишаються актуальними.
+- Всі дослідницькі питання залишаються актуальними.
     - Початкові дослідницькі питання що потребують уточнення:
         - За скільки ігрових годин в сердньому набирається перших 50% рев'ю (позитивних/негативних).
         - Яка середня ціна гри по кожному із рейтингів.
     - Початкові гіпотези, що потребують подальшого розгляду:
-        - Ціни із високими знижками скоріше за все сприяють збільшенню рейтингу.
+        - Можливо велика к-сть рев'ю може мати позитивний вплив на середню корисність рев'ю певного користувача.
+        - Ціни із високими знижками скоріше за все сприяють зменшенню рейтингу.
         - Скоріше за все зв'язок між кумедністю та корисністю рев'ю - прямий (вища кумедність = вища корисність).
         - Підтримка додаткових платформ `Mac` та `Linux (native)` скоріше за все не змінює вартість гри.
+    - Гіпотези після проведення EDA:
+        - В сердньому 50% негативних рев'ю можуть збираються швидше ніж позитивні.
 - Головним обмеженням даного аналізу є великий розмір датасету, однак використання спецальних бібліотек типу `fastqq` непогано вирішує це питання навіть без додаткованих обцислюючих потужностей.
 
 
+\newpage
 
 # Лабораторна №2 -- Статистичне виведення --
 
 Далі всі уточнюючі обчислення будуть згруповані відносно відповідних дослідних питань.
 
-```{r, message = FALSE, echo = FALSE}
+```{r, message = FALSE, echo = FALSE, eval = TRUE}
 options(pillar.sigfig = 8)
 ```
 
@@ -458,10 +471,10 @@ options(pillar.sigfig = 8)
 
 -   **За скільки ігрових годин в сердньому набирається перших 50% рев'ю (позитивних/негативних)**
 
-Обрахуємо довірчий інтервал для середніх, що має **t-розподіл**.
+Обрахуємо довірчий інтервал для середніх, що мають **нормальний розподіл**.
 
-```{r, message = FALSE, echo = FALSE}
-confidence_interval <- 0.95
+```{r, message = FALSE, echo = FALSE, eval = TRUE}
+alpha <- 0.05
 
 pdata <- data %>% group_by(hours, is_recommended) %>%
     summarise(recomendation_count = length(is_recommended))
@@ -482,20 +495,25 @@ pdata <- pdata %>%
 
 pdata <- pdata %>%
     group_by(is_recommended) %>%
-    mutate(se = sd/n) %>%
-    mutate(t_value = qt((1 + confidence_interval) / 2, df = n - 1)) %>%
-    mutate(lower = mean_hours - t_value * se) %>%
-    mutate(upper = mean_hours + t_value * se) %>%
-    select(-c(se,sd,t_value))
-pdata
+    mutate(se = sd/sqrt(n)) %>%
+    mutate(lower = mean_hours + qnorm(0.025) * se) %>%
+    mutate(upper = mean_hours + qnorm(0.975) * se) %>%
+    mutate(t_lower = mean_hours - qt(1 - alpha/2, n - 1) * se) %>%
+    mutate(t_upper = mean_hours + qt(1 - alpha/2, n - 1) * se) %>%
+    select(-c(se,sd))
+
+knitr::kable(pdata, "simple")
 ```
+
+Щодо даних довірчих інтервалів можна сказати лиш одне,
+асимптотичний довірчий інтервал не сильно відрізняється від t-розподілу.
 
 -   **Яка середня ціна гри по кожному із рейтингів**
 
-Обрахуємо довірчий інтервал для середніх, що має **t-розподіл**.
+Обрахуємо довірчий інтервал для середніх, що мають **нормальний розподіл**.
 
-```{r, echo = FALSE}
-confidence_interval <- 0.95
+```{r, echo = FALSE, eval = TRUE}
+alpha <- 0.05
 
 pdata <- data %>% distinct(app_id, .keep_all = TRUE) %>% select(price_original, rating)
 pdata <- pdata %>%
@@ -508,13 +526,307 @@ pdata <- pdata %>%
 
 pdata <- pdata %>%
     group_by(rating) %>%
-    mutate(se = sd/n) %>%
-    mutate(t_value = qt((1 + confidence_interval) / 2, df = n - 1)) %>%
-    mutate(lower = mean_price - t_value * se) %>%
-    mutate(upper = mean_price + t_value * se) %>%
-    select(-c(se,sd,t_value))
-pdata
+    mutate(se = sd/sqrt(n)) %>%
+    mutate(lower = mean_price + qnorm(0.025) * se) %>%
+    mutate(upper = mean_price + qnorm(0.975) * se) %>%
+    mutate(t_lower = mean_price - qt(1 - alpha/2, n - 1) * se) %>%
+    mutate(t_upper = mean_price + qt(1 - alpha/2, n - 1) * se) %>%
+    select(-c(se,sd))
+
+knitr::kable(pdata, "simple")
 ```
+
+З приводу даних довірчих інтервалів варто відзначити, що:
+
+- При великій к-сті даних одбидва довірчих інтервали схожі (t-розпподіл, та асимптотичний)
+- При малій к-сті даних інтервал побудовний t-розподілом є трохи кращим, так як він чітко вказує, що цим вимірам не точні.
+
+
+Обрахуємо також 1,3 квартилі та їх довірчі інтервали. Застосуємо **бутстреп**.
+
+```{r, echo = FALSE, eval = TRUE}
+get_1st_quartile <- function(data, index) {
+  return(quantile(data[index], 0.25))
+}
+get_3rd_quartile <- function(data, index) {
+  return(quantile(data[index], 0.75))
+}
+
+B <- 1000
+
+pdata <- data %>% distinct(app_id, .keep_all = TRUE) %>% select(price_original, rating)
+
+pdata <- pdata %>%
+    group_by(rating) %>%
+    summarise(
+        n = length(price_original),
+        quartile_1 = boot.ci(boot(price_original, statistic = get_1st_quartile, R=B), type="perc")$t0,
+        quartile_1_lower = boot.ci(boot(price_original, statistic = get_1st_quartile, R=B), type="perc")$percent[4],
+        quartile_1_upper = boot.ci(boot(price_original, statistic = get_1st_quartile, R=B), type="perc")$percent[5],
+        quartile_3 = boot.ci(boot(price_original, statistic = get_3rd_quartile, R=B), type="perc")$t0,
+        quartile_3_lower = boot.ci(boot(price_original, statistic = get_3rd_quartile, R=B), type="perc")$percent[4],
+        quartile_3_upper = boot.ci(boot(price_original, statistic = get_3rd_quartile, R=B), type="perc")$percent[5]
+    )
+
+knitr::kable(pdata, "simple")
+```
+
+З приводу даних довірчих інтервалів можна додати лиш те, що інтервали є досить великими.
+
+-   **Чи змінює початкову вартість гри підтримка Mac, Linux (native)**
+
+Обрахуємо довірчий інтервал для середніх, що мають **нормальний розподіл**.
+
+```{r, message = FALSE, echo = FALSE, eval = TRUE}
+alpha <- 0.05
+
+pdata <- data %>% distinct(app_id, .keep_all = TRUE)
+
+pdata$winonly <- ifelse(pdata$mac | pdata$linux, FALSE, TRUE)
+
+pdata <- pdata %>%
+    group_by(winonly) %>%
+    summarise(
+        mean_price = mean(price_original),
+        n = length(price_original),
+        sd = sd(price_original)
+    )
+
+pdata <- pdata %>%
+    group_by(winonly) %>%
+    mutate(se = sd/sqrt(n)) %>%
+    mutate(lower = mean_price + qnorm(0.025) * se) %>%
+    mutate(upper = mean_price + qnorm(0.975) * se) %>%
+    mutate(t_lower = mean_price - qt(1 - alpha/2, n - 1) * se) %>%
+    mutate(t_upper = mean_price + qt(1 - alpha/2, n - 1) * se) %>%
+    select(-c(se,sd))
+
+knitr::kable(pdata, "simple")
+```
+
+\newpage
+
+-   **Залежність між рейтингом та ціною з високою знижкою**
+
+Коефіцієнт кореляції не має нормального розподілу, тому будем використовувати **бутстреп**
+
+```{r, echo = FALSE, eval = TRUE}
+boot_cor_with_sd <- function(X, indices, estimate_var = TRUE){
+  cor_bar <- cor(X[indices, ])[1, 2]
+
+  if (estimate_var){
+    boot_out <- boot(X[indices, ], statistic = boot_cor_with_sd, R = 200, estimate_var = FALSE)
+
+    return(c(cor_bar, var(boot_out$t[, 1])))
+  }
+  else {
+    return(cor_bar)
+  }
+}
+
+B <- 2000
+
+pdata <- data %>%
+    distinct(app_id, .keep_all = TRUE) %>%
+    select(positive_ratio, price_final, discount) %>%
+    arrange(discount) %>%
+    filter(discount > 0)
+
+quartile_3rd <- quantile(pdata$discount)[4]
+
+pdata <- pdata %>% filter(discount >= quartile_3rd) %>% select(price_final, positive_ratio)
+
+boot_result_cor <- boot(pdata, statistic = boot_cor_with_sd, R = B, estimate_var = FALSE)
+
+normal <- boot.ci(boot_result_cor, type = "norm")
+basic <- boot.ci(boot_result_cor, type = "basic")
+percentile <- boot.ci(boot_result_cor, type = "perc")
+
+print("Normal confidence interval:")
+print(normal)
+print("Basic confidence interval:")
+print(basic)
+print("Percentile confidence interval:")
+print(percentile)
+```
+
+Всі обраховані варіанти бутстрепу дали +- один і той самий результат.
+З приводу самого результату можна вказати декілька фактів:
+
+- Довірчий інтервал знаходиться строго лівіше від нуля (< 0)
+- Гіпотеза про зв'язок фінальної ціни з високою знижкою та низьким рейтингом підтверджується
+- Варто відзначити те, що інтервал є досить великим. (на мою думку це через те, що на рейтинг впливає не тільки і не скільки фінальна ціна а щось інше)
+
+\newpage
+
+
+-   **Зв'язок між кількістю рев'ю користувача і їх корисністю**
+
+Коефіцієнт кореляції не має нормального розподілу, тому будем використовувати **бутстреп**
+
+```{r, echo = FALSE, fig.cap = "Розподіли рев'ю та користності", eval = TRUE}
+boot_cor_with_sd <- function(X, indices, estimate_var = TRUE){
+  cor_bar <- cor(X[indices, ])[1, 2]
+
+  if (estimate_var){
+    boot_out <- boot(X[indices, ], statistic = boot_cor_with_sd, R = 200, estimate_var = FALSE)
+
+    return(c(cor_bar, var(boot_out$t[, 1])))
+  }
+  else {
+    return(cor_bar)
+  }
+}
+
+B <- 2000
+
+usertb <- data %>%
+    group_by(user_id) %>%
+    summarise(helpfullness = sum(helpful))
+
+reviewtb <- data %>%
+    distinct(user_id, .keep_all = TRUE) %>%
+    select(user_id, reviews)
+
+pdata <- inner_join(usertb, reviewtb, by="user_id")
+pdata <- pdata %>% select(-c(user_id))
+
+pdata <- pdata %>%
+    filter(helpfullness > 0) %>%
+    filter(reviews > 0)
+
+boot_result_cor <- boot(pdata, statistic = boot_cor_with_sd, R = B, estimate_var = FALSE)
+
+normal <- boot.ci(boot_result_cor, type = "norm")
+basic <- boot.ci(boot_result_cor, type = "basic")
+percentile <- boot.ci(boot_result_cor, type = "perc")
+
+print("Normal confidence interval:")
+print(normal)
+print("Basic confidence interval:")
+print(basic)
+print("Percentile confidence interval:")
+print(percentile)
+```
+
+Зв'язок є статистично значущим, однак незначним. Тому початкову гіпотезу можна відкинути.
+
+\newpage
+
+
+-   **Зв'язок між кумедністю рев'ю та його корисністю**
+
+Коефіцієнт кореляції не має нормального розподілу, тому будем використовувати **бутстреп**
+
+```{r, echo = FALSE, eval = TRUE}
+boot_cor_with_sd <- function(X, indices, estimate_var = TRUE){
+  cor_bar <- cor(X[indices, ])[1, 2]
+
+  if (estimate_var){
+    boot_out <- boot(X[indices, ], statistic = boot_cor_with_sd, R = 200, estimate_var = FALSE)
+
+    return(c(cor_bar, var(boot_out$t[, 1])))
+  }
+  else {
+    return(cor_bar)
+  }
+}
+
+B <- 2000
+
+pdata <- data %>%
+    group_by(user_id) %>%
+    summarise(
+        helpful = sum(helpful),
+        funny = sum(funny)
+    ) %>%
+    select(-user_id) %>%
+    filter(funny > 0) %>%
+    filter(helpful > 0)
+
+boot_result_cor <- boot(pdata, statistic = boot_cor_with_sd, R = B, estimate_var = FALSE)
+
+normal <- boot.ci(boot_result_cor, type = "norm")
+basic <- boot.ci(boot_result_cor, type = "basic")
+percentile <- boot.ci(boot_result_cor, type = "perc")
+
+print("Normal confidence interval:")
+print(normal)
+print("Basic confidence interval:")
+print(basic)
+print("Percentile confidence interval:")
+print(percentile)
+```
+
+Зв'язок є статистично значущим і є значним. Початкова гіпотеза підтверджується.
+
+\newpage
 
 
 ## Тестування гіпотез
+
+-   **В сердньому 50% негативних рев'ю можуть збиратися швидше ніж позитивні**
+
+Протестуємо гіпотезу:
+
+- H0: negative_meanhours - positive_meanhours >= 0
+- H1: negative_meanhours - positive_meanhours < 0
+
+```{r, message = FALSE, echo = FALSE, eval = TRUE}
+alpha <- 0.05
+
+pdata <- data %>% group_by(hours, is_recommended) %>%
+    summarise(recomendation_count = length(is_recommended))
+
+pdata <- pdata %>%
+    group_by(is_recommended) %>%
+    mutate(csum = cumsum(recomendation_count)) %>%
+    mutate(percent = csum/sum(recomendation_count))
+
+pdata <- pdata %>%
+    filter(percent < 0.5)
+
+t.test(hours ~ is_recommended, data = pdata, alternative="less")
+```
+
+Можна відкинути початкову H0.
+Тобто в середньому 50% негативних рев'ю набирається за меншу к-сть ігрових годин ніж позитивних.
+
+\newpage
+
+
+-   **Підтримка додаткових платформ `Mac` та `Linux (native)` скоріше за все не змінює вартість гри**
+
+Протестуємо гіпотезу:
+
+- H0: win_meanprice - nonwin_meanprice >= 0
+- H1: win_meanprice - nonwin_meanprice < 0
+
+```{r, message = FALSE, echo = FALSE, eval = TRUE}
+pdata <- data %>% distinct(app_id, .keep_all = TRUE)
+
+pdata$winonly <- ifelse(pdata$mac | pdata$linux, FALSE, TRUE)
+
+t.test(price_original ~ winonly, data = pdata, alternative="less")
+```
+
+Можна відкинути початкову H0.
+Тобто підтримка `Mac` та/або `Linux (native)` не змінює (не збільшує) ціну гри в порівнянні з `Windows`.
+
+\newpage
+
+
+## Висновки cтатистичного виведення
+
+На основі проведеного розвідкового аналізу можна зробити наступні висновки::
+
+- Було уточнено наступні питання:
+    - За скільки ігрових годин в сердньому набирається перших 50% рев'ю (позитивних/негативних).
+    - Яка середня ціна гри по кожному із рейтингів.
+- Підтврджено гіпотези:
+    - Ціни із високими знижками скоріше за все сприяють зменшенню рейтингу.
+    - Скоріше за все зв'язок між кумедністю та корисністю рев'ю - прямий (вища кумедність = вища корисність).
+    - Підтримка додаткових платформ `Mac` та `Linux (native)` скоріше за все не змінює вартість гри.
+    - В сердньому 50% негативних рев'ю можуть збираються швидше ніж позитивні.
+- Спростовані гіпотези:
+    - Можливо велика к-сть рев'ю може мати позитивний вплив на середню корисність рев'ю певного користувача.
