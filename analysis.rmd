@@ -19,6 +19,9 @@ library(tidyverse)
 library(GGally)
 library(fastqq)
 library(boot)
+library(stargazer)
+library(lmtest)
+library(car)
 ```
 
 # Лабораторна №0 -- Вибір датасету --
@@ -201,11 +204,13 @@ data %>% distinct(review_id, .keep_all = TRUE) %>%
 
 ### Викиди
 
-Очевидними кандидатами на перевірку викидів є `helpful`, `funny` та `products`.
+Очевидними кандидатами на перевірку викидів є `helpful`, `funny`, `products` та `hours`.
 
 ```{r, echo = FALSE, eval = TRUE}
 data  %>% distinct(review_id, .keep_all = TRUE) %>% pull(helpful) %>% qqnorm(main = "Helpful qq plot")
+data  %>% distinct(review_id, .keep_all = TRUE) %>% pull(hours) %>% qqnorm(main = "Hours qq plot")
 data  %>% distinct(app_id, .keep_all = TRUE)  %>% pull(funny) %>% qqnorm(main = "Funny qq plot")
+data  %>% distinct(app_id, .keep_all = TRUE)  %>% pull(user_reviews) %>% qqnorm(main = "Reviews qq plot")
 data  %>% distinct(user_id, .keep_all = TRUE) %>% pull(products) %>% qqnorm(main = "Products qq plot")
 ```
 
@@ -214,7 +219,10 @@ data  %>% distinct(user_id, .keep_all = TRUE) %>% pull(products) %>% qqnorm(main
 ```{r, echo = FALSE, message = FALSE}
 data <- data %>%
     filter(funny < 500) %>%
-    filter(helpful < 17000)
+    filter(helpful < 25000) %>%
+    filter(user_reviews < 1000000) %>%
+    filter(price_original < 100) %>%
+    filter(price_final < 100)
 ```
 
 
@@ -830,3 +838,226 @@ t.test(price_original ~ winonly, data = pdata, alternative="less")
     - В сердньому 50% негативних рев'ю можуть збираються швидше ніж позитивні.
 - Спростовані гіпотези:
     - Можливо велика к-сть рев'ю може мати позитивний вплив на середню корисність рев'ю певного користувача.
+
+
+
+# Лабораторна №3 -- Регресійний аналіз --
+
+## Вступ
+
+Для регресійного аналізу необхідна досить таки велика к-сть різних факторів.
+Саме тому буде проведено регресійний аналіз над іграми (із окремого __[датасету](https://huggingface.co/datasets/FronkonGames/steam-games-dataset/viewer/FronkonGames--steam-games-dataset/train)__).
+Також варто зауважити що у цьому датасеті ~70 000 записів, тому аналіз буде проведено не у 2020-2022 а по всіх роках. (на відміну від попереднього датасету тут десь на 20 000 ігор більше).
+
+__Life is life and life never goes as planned.__
+
+```{r, data_import_2, include = FALSE}
+rm(data); gc();
+data <- read_csv(
+        "data/games_meta.csv",
+        col_names = c("app_id","title","date_release","estimated_owners","peak_ccu",
+                     "required_age","price","dlc_count","x_about_game","text_languages",
+                     "audio_languages","x_reviews","x_header_image","x_website","x_support_url",
+                     "x_support_email","windows","mac","linux","metacritic_score","x_metacritic_url",
+                     "user_score","positive","negative","x_score_rank","achievements","recommendations",
+                     "x_notes","average_playtime_forever","average_playtime_two_weeks","median_playtime_forever",
+                     "median_playtime_two_weeks","x_developers","x_publishers","categories",
+                     "genres","tags","x_screenshots","x_movies"),
+        col_select = c("app_id","title","date_release","estimated_owners","peak_ccu","required_age","price",
+                      "dlc_count","text_languages", "audio_languages","windows","mac","linux",
+                      "metacritic_score","user_score","positive","negative","achievements","recommendations",
+                      "average_playtime_forever","average_playtime_two_weeks","median_playtime_forever",
+                      "median_playtime_two_weeks","categories","genres","tags"),
+        skip = 1,
+    )
+```
+
+### Підготовка даних
+
+- Зконвертовано дати в правильний формат
+- Уніфіковано вигляд nested колонок (наприклад tags)
+- Перероблено `estimated_owners` ("0 - 1000" => 1000)
+- Відфільтровано ігри у яких не зазнчаений середній час гри
+
+```{r}
+glimpse(data)
+data$date_release <- as.Date(data$date_release, format = "%b %d, %y")
+data <- data %>%
+    rowwise() %>%
+    mutate(
+        text_languages = str_replace_all(text_languages, "[\\[\\]' ]", ""),
+        audio_languages = str_replace_all(audio_languages, "[\\[\\]' ]", ""),
+        estimated_owners = as.integer(str_match(estimated_owners, "([0-9]+) - ([0-9]+)")[3])
+    ) %>%
+    mutate(
+        text_languages_count = str_count(text_languages, "([A-Za-z]+)"),
+        audio_languages_count = str_count(audio_languages, "([A-Za-z]+)"),
+        positive_ratio = ifelse(positive+negative == 0, 0, positive/(positive + negative))
+    )
+data <- data %>%
+    select(
+        estimated_owners, price, median_playtime_forever,
+        dlc_count, text_languages_count, audio_languages_count, positive_ratio
+    )
+data %>% summary
+```
+
+### Викиди
+
+```{r, echo = FALSE, eval = TRUE}
+data  %>% pull(estimated_owners) %>% qqnorm(main = "Estimated owners qq plot")
+data  %>% pull(price) %>% qqnorm(main = "Price qq plot")
+data  %>% pull(median_playtime_forever) %>% qqnorm(main = "Median playtime qq plot")
+```
+
+```{r, echo = FALSE, message = FALSE}
+data <- data %>%
+    filter(estimated_owners < 1e7) %>%
+    filter(price < 90) %>%
+    filter(median_playtime_forever < 5000)
+```
+
+## Моделювання
+
+**Чи збільшення ціни збільшує медіанний час гри?**
+
+1) Залежною змінною медіана ігрових годин, а незалежною ціна.
+
+2) Логаритми будуть застосовані до ціни (price).
+
+3) OVB
+
+- Оскільки медіана ігрових годин явно залежить не тільки від ціни то буде присутнє OVB
+- Для мінімізації OVB потрібно буде ввести контрольні змінні
+- На медіанний час гри в цілому може впливати наступний набір факторів:
+    - Ціна
+    - Популярність гри
+    - Суб'єктивна оцінка гри гравцями
+    - Підтримка різних мов доступність гри
+    - Підтримка гри після випуску
+- Контрольні змінні (наявні в датасеті):
+    1. Приблизна к-сть власників гри (популярність)
+    2. Відношення позитивних відгуків до всіх відгуків
+    3. К-сть мов які підтримує гра в текстовому/аудіо форматі
+    4. К-сть доповнень (підтримка гри після випуску)
+- Гіпотези по коефіцієнтам біля контрольних змінних та їх OVB:
+    1. Додатній, великий вплив
+    2. Додатній, значний вплив
+    3. Додатній, незначний вплив
+    4. Додатній, незначний вплив
+
+```{r, message = FALSE, echo = FALSE, eval = TRUE}
+data <- data %>%
+    filter(median_playtime_forever > 0) %>%
+    filter(price > 0)
+
+data %>% summary
+data$estimated_owners <- as.factor(data$estimated_owners)
+
+l1_model <- lm(median_playtime_forever ~ I(log(price)), data = data)
+l1_model_hc2 <- coeftest(l1_model, vcov. = hccm(l1_model, type="hc2"))
+
+l2_model <- lm(median_playtime_forever ~ I(log(price)) + estimated_owners, data = data)
+l2_model_hc2 <- coeftest(l2_model, vcov. = hccm(l2_model, type="hc2"))
+
+l3_model <- lm(median_playtime_forever ~ I(log(price)) + estimated_owners + dlc_count, data = data)
+l3_model_hc2 <- coeftest(l3_model, vcov. = hccm(l3_model, type="hc2"))
+
+l4_model <- lm(median_playtime_forever ~ I(log(price)) + estimated_owners + dlc_count + text_languages_count + audio_languages_count, data = data)
+l4_model_hc2 <- coeftest(l4_model, vcov. = hccm(l4_model, type="hc2"))
+
+l5_model <- lm(median_playtime_forever ~ I(log(price)) + estimated_owners + dlc_count + positive_ratio, data = data)
+l5_model_hc2 <- coeftest(l5_model, vcov. = hccm(l5_model, type="hc2"))
+
+stargazer(
+    l1_model, l2_model, l3_model,l4_model,l5_model,
+    type = "text",
+    se = list(l1_model_hc2[,2],l2_model_hc2[,2],l3_model_hc2[,2],l4_model_hc2[,2],l5_model_hc2[,2]),
+    no.space = TRUE,
+    omit.stat = c("rsq", "f", "ser"),
+    digits = 3
+)
+```
+
+Із наведеної вище моделі можна зробити наступні висновки:
+
+- Контрольні змінні, які стосувались локалізації виявились статистично незначущими (і не дивно)
+- OVB було мінімізовано за допомогою наступних контрольних змінних:
+    - Приблизна к-сть власників гри (популярність)
+    - Відношення позитивних відгуків до всіх відгуків
+    - К-сть доповнень (підтримка гри після випуску) (майже значуща)
+- Контролюючи контрольні змінні можна говорити про причинно-наслідковий зв'язок.
+
+## Перевірка моделі на стійкість
+
+- Модель є лінійно-логаритмічною, то варто спробувати додати степені.
+
+```{r, message = FALSE, echo = FALSE, eval = TRUE}
+l1_model <- lm(median_playtime_forever ~ I(log(price)) + estimated_owners + positive_ratio, data = data)
+l1_model_hc2 <- coeftest(l1_model, vcov. = hccm(l1_model, type="hc2"))
+
+l2_model <- lm(median_playtime_forever ~ I(log(price)) + I(log(price)^2) + estimated_owners + positive_ratio, data = data)
+l2_model_hc2 <- coeftest(l2_model, vcov. = hccm(l2_model, type="hc2"))
+
+l3_model <- lm(median_playtime_forever ~ I(log(price)) + I(log(price)^2) + I(log(price)^3) + estimated_owners + positive_ratio, data = data)
+l3_model_hc2 <- coeftest(l3_model, vcov. = hccm(l3_model, type="hc2"))
+
+stargazer(
+    l1_model, l2_model, l3_model,
+    type = "text",
+    se = list(l1_model_hc2[,2],l2_model_hc2[,2],l3_model_hc2[,2]),
+    no.space = TRUE,
+    omit.stat = c("rsq", "f", "ser"),
+    digits = 3
+)
+
+ggplot(data, aes(x = I(log(price)), y = median_playtime_forever)) +
+    geom_point() +
+    labs(x = "Log(Price)", y = "Median in-game minutes") +
+    geom_smooth(method = "lm", formula = y ~ x, se = FALSE, color = "green") +
+    geom_smooth(method = "lm", formula = y ~ x + I(x^2), se = FALSE, color = "blue") +
+    geom_smooth(method = "lm", formula = y ~ x + I(x^2) + I(x^3), se = FALSE, color = "red")
+```
+
+
+## Оцінювання моделей
+
+### Інтерпретація кофеіцієнтів
+
+Розглянемо ціну (єдиний ключовий регресор).
+Всі коефіцієнти біля даного регресора є статистично значущими.
+
+Наведемо зміну ціни з 10 до 11 доларів:
+
+- Для лінійної моделі зміна ціни (price) на 10% = збільшенню медіани на 11.23 хв
+- Для квадратичної моделі зміна ціни на 10% = збільшенню медіани на 19.29 хв
+- Для кубічної моделі зміна ціни на 10% = збільшенню медіани на 14.78 хв
+
+### Статистична значущість груп коефііцієнтів
+
+- Розглянемо значущість категорії estimated_owners
+
+```{r, message = FALSE, echo = FALSE, eval = TRUE}
+linearHypothesis(l3_model,
+    c("estimated_owners50000 = 0", "estimated_owners100000 = 0",
+      "estimated_owners200000 = 0", "estimated_owners500000 = 0",
+      "estimated_owners1000000 = 0", "estimated_owners2000000 = 0",
+      "estimated_owners5000000 = 0"),
+    vcov = hccm(l3_model, type="hc2")
+)
+```
+
+Відкидаємо гіпотезу про рівність
+
+- Розглянемо значущість степеней логаритму
+
+```{r, message = FALSE, echo = FALSE, eval = TRUE}
+linearHypothesis(l3_model,
+    c("I(log(price)^2) = 0", "I(log(price)^3) = 0"),
+    vcov = hccm(l3_model, type="hc2")
+)
+```
+
+Відкидаємо гіпотезу про рівність
+
+
